@@ -42,13 +42,7 @@ async function getRedirectedCookies(location, cookie) {
         window.addEventListener('message', (e) => {
           if (typeof e.data == 'object' && 'cookies' in e.data) {
             iframeCookie = e.data.cookies;
-            e.source.postMessage({'expireCookie': cookie}, '*');
-          }
-
-          // wait on the iframe to tell us it deleted the cookies before
-          // resolving, to avoid any state race conditions.
-          if (e.data == 'expired') {
-            resolve(iframeCookie);
+            test_driver.delete_all_cookies(win).then(() => resolve(iframeCookie));
           }
         });
       }, {once: true});
@@ -58,6 +52,14 @@ async function getRedirectedCookies(location, cookie) {
       reject(e);
     }
   });
+}
+
+// clearCookies ensures loaded frames start in a clean state.
+async function clearCookies(location) {
+  const iframe = document.createElement('iframe');
+  iframe.style = 'display: none';
+  iframe.src = location;
+  await test_driver.delete_all_cookies(iframe);
 }
 
 // httpCookieTest sets a `cookie` (via HTTP), then asserts it was or was not set
@@ -90,8 +92,14 @@ function httpCookieTest(cookie, expectedValue, name, defaultPath = true) {
 // This is a variation on httpCookieTest, where a redirect happens via
 // the Location header and we check to see if cookies are sent via
 // getRedirectedCookies
+//
+// Note: this function has a dependency on testdriver.js. Any test files calling
+// it should include testdriver.js and testdriver-vendor.js
 function httpRedirectCookieTest(cookie, expectedValue, name, location) {
   return promise_test(async (t) => {
+    await clearCookies(location);
+    t.add_cleanup(test_driver.delete_all_cookies);
+
     const encodedCookie = encodeURIComponent(JSON.stringify(cookie));
     const encodedLocation = encodeURIComponent(location);
     const setParams = `?set=${encodedCookie}&location=${encodedLocation}`;
@@ -104,7 +112,6 @@ function httpRedirectCookieTest(cookie, expectedValue, name, location) {
     } else {
       assert_equals(cookies, expectedValue, 'The cookie was rejected.');
     }
-    await fetch(`/cookies/resources/cookie.py?drop=${encodedCookie}`);
   }, name);
 }
 
